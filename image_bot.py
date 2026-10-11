@@ -87,6 +87,27 @@ bot = Bot(vault=args.vault or f"./{args.username}-vault", username=args.username
           picture=args.picture if args.picture and os.path.exists(args.picture) else None,
           about="I make pictures from a description, on this server's own machine. "
                 "`!imagine a lighthouse in a storm`, or write to me directly. `!help` for the rest.")
+bot.version = "1.1"
+made = {"count": 0}
+
+
+def keep_setting(key, value):
+    bot.store[key] = value
+    bot.store.save()
+
+
+# The bot's page in the app (tap it in the members list, Manage). The same
+# things as the !images commands, as controls.
+bot.permission("use", "May ask for pictures", help="The roles that can ask me for pictures. Those who manage bots always can.")
+bot.setting("limit", "number", "Pictures per person in ten minutes", help="0 means no limit.", min=0, max=1000,
+            get=lambda: bot.store.get("limit", PER_PERSON), set=lambda v: keep_setting("limit", v))
+bot.setting("adult", "choice", "Adult pictures", options=["off", "nsfw"],
+            help="off: nowhere. nsfw: only in channels marked NSFW. Decided by the words asked for.",
+            get=lambda: bot.store.get("adult", "off"), set=lambda v: keep_setting("adult", v))
+bot.setting("channels", "channels", "Channels I work in", help="None chosen: wherever I am. Direct chats always.",
+            get=lambda: list(bot.store.get("channels", [])), set=lambda v: keep_setting("channels", v))
+bot.info("made", "Pictures made since I started", get=lambda: str(made["count"]))
+
 lock = threading.Lock()
 line = []           # requests waiting or being made, oldest first
 asked = {}          # user id -> when they asked, for the limit
@@ -195,6 +216,7 @@ def job(entry):
         caption = f"**{prompt}**\n`--seed {seed}{extras}` · {took:.0f} s"
         bot.send_file(message.room_id, path, caption, reply_to=message.event_id, thread=message.thread)
         last_words[message.room_id] = (prompt, settings)
+        made["count"] += 1
         # Nothing of a picture stays behind: the file is removed below, the
         # picture program keeps none, and the bot's vault holds only the
         # message that carried it.
@@ -216,6 +238,8 @@ def job(entry):
 def ask(message, text, again=False):
     if not works_here(message):
         return None   # not its place: silence, as for any other chatter
+    if not bot.allowed(message.sender_id, "use"):
+        return "You may not ask me for pictures here. Someone who manages bots can change that on my page."
     parsed, settings = parse(text)
     if parsed is None:
         return settings

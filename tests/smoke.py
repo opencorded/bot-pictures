@@ -196,6 +196,34 @@ def main():
             time.sleep(0.2)
         assert asked[-1]["prompt"] == "back in the right place"
         print("ok  chosen channels: only a manager chooses; elsewhere it stays silent; off and on")
+
+        # Its page in the app: the same settings as controls, and a permission of its own.
+        got = []
+        alice.on_event("m.bot.")(got.append)
+        with_bot = alice.dm("pictures")
+
+        def page(kind, **content):
+            del got[:]
+            alice.request({"cmd": "send_event", "room_id": with_bot, "type": kind, "content": content, "expires_in": 3600})
+            end = time.time() + 20
+            while time.time() < end:
+                pages = [g["content"] for g in got if g["type"] == "m.bot.description"]
+                if pages:
+                    return {c["key"]: c for c in pages[-1]["controls"]}
+                time.sleep(0.2)
+            raise AssertionError("the bot did not describe itself")
+        controls = page("m.bot.describe")
+        assert controls["limit"]["value"] == 0 and controls["adult"]["value"] == "off", controls
+        assert [o["title"] for o in controls["channels"]["options"]] and controls["channels"]["value"], controls["channels"]
+        assert controls["permission:use"]["value"] == ["@everyone"] and controls["made"]["value"].isdigit()
+        controls = page("m.bot.set", key="limit", value=3)
+        assert controls["limit"]["value"] == 3
+        page("m.bot.set", key="permission:use", value=[])
+        requests = len(asked)
+        bob.say("#art", "!imagine a thing I may not ask for")
+        wait_for("being told no", bob_texts, lambda m: "may not ask me for pictures" in m.body)
+        assert len(asked) == requests
+        print("ok  its page: limit, adult rule and channels as controls; a role-held permission to ask for pictures")
         print("all image bot checks passed")
     finally:
         for proc in started:
