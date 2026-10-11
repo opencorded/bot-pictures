@@ -41,7 +41,7 @@ parser.add_argument("--idle", type=int, default=45,
 args = parser.parse_args()
 
 one_at_a_time = threading.Lock()
-state = {"pipe": None, "model": args.model, "step": 0, "steps": 0, "busy": False, "used": 0.0}
+state = {"pipe": None, "model": args.model, "step": 0, "steps": 0, "busy": False, "used": 0.0, "stop": False}
 
 
 def free_the_card():
@@ -164,6 +164,10 @@ def make(request):
         return draw(request)
 
 
+class Interrupted(Exception):
+    """The picture being made was asked to stop."""
+
+
 def draw(request):
     import torch
     prompt = str(request.get("prompt", ""))[:2000]
@@ -175,7 +179,7 @@ def draw(request):
     if seed < 0:
         seed = int.from_bytes(os.urandom(4), "big")
     with one_at_a_time:
-        state.update(step=0, steps=steps, busy=True)
+        state.update(step=0, steps=steps, busy=True, stop=False)
         try:
             wanted = str((request.get("override_settings") or {}).get("sd_model_checkpoint") or "") or args.model
             if wanted != args.model and wanted not in models_here():
@@ -194,13 +198,18 @@ def draw(request):
             names = ("prompt_embeds", "negative_prompt_embeds", "pooled_prompt_embeds", "negative_pooled_prompt_embeds")
             words = dict(zip(names, read))
 
-            def progress(_pipe, step, _timestep, kwargs):
+            def progress(running, step, _timestep, kwargs):
                 state["step"] = step + 1
+                if state["stop"]:
+                    running._interrupt = True   # asked to stop: the remaining steps are skipped
                 return kwargs
             latents = pipe(**{k: v for k, v in words.items() if v is not None}, width=width, height=height,
                            num_inference_steps=steps, guidance_scale=float(request.get("cfg_scale", 7.0)),
                            generator=torch.Generator("cpu").manual_seed(seed),
                            callback_on_step_end=progress, output_type="latent").images
+            if state["stop"]:
+                del latents
+                raise Interrupted("stopped before it was finished")
             # The last stage, done apart so that the drawing's working memory is given back first.
             torch.cuda.empty_cache()
             with torch.no_grad():
@@ -244,8 +253,13 @@ class Handler(BaseHTTPRequestHandler):
                 unload()
                 self.answer(200, {"unloaded": True})
             return
+        if self.path.startswith("/sdapi/v1/interrupt"):
+            # The picture being made is given up at its next step (AUTOMATIC1111 has the same).
+            state["stop"] = state["busy"]
+            self.answer(200, {"interrupted": bool(state["busy"])})
+            return
         if not self.path.startswith("/sdapi/v1/txt2img"):
-            self.answer(404, {"error": "only /sdapi/v1/txt2img is served here"})
+            self.answer(404, {"error": "only /sdapi/v1/txt2img, /sdapi/v1/interrupt and /unload are served here"})
             return
         try:
             request = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")

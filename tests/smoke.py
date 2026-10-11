@@ -31,6 +31,7 @@ os.environ["CORDED_CLI"] = os.path.join(bin_dir, "corded-cli")
 PNG = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNoAAAAggCBd81ytgAAAABJRU5ErkJggg==")
 asked = []
 slow = {"seconds": 0.0}
+stops = []
 
 
 def free_port():
@@ -42,8 +43,22 @@ def free_port():
 class Pictures(BaseHTTPRequestHandler):
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if self.path.startswith("/sdapi/v1/interrupt"):
+            stops.append(time.time())
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"{}")
+            return
         asked.append(body)
-        time.sleep(slow["seconds"])
+        waited, stopped = 0.0, len(stops)
+        while waited < slow["seconds"]:
+            time.sleep(0.1)
+            waited += 0.1
+            if len(stops) > stopped:   # given up, as the real one does at its next step
+                self.send_response(500)
+                self.end_headers()
+                return
         seed = body["seed"] if body["seed"] >= 0 else 4242
         answer = json.dumps({"images": [base64.b64encode(PNG).decode()], "info": json.dumps({"seed": seed})}).encode()
         self.send_response(200)
@@ -277,6 +292,41 @@ def main():
         assert asked[-1]["override_settings"] == {"sd_model_checkpoint": "first/model"}, asked[-1]
         alice.say("#art", "!imagine nothing --model nowhere")
         wait_for("an unknown model", alice_texts, lambda m: "no model called nowhere" in m.body)
+        # Under a request: an hourglass and an X while it is made, a check mark when done; the X calls it off.
+        import types
+        marks = []
+        alice.on_reaction(marks.append)
+        before = len(alice_files)
+        done = alice.say("#art", "!imagine one to watch")
+        for _ in range(100):
+            if any(m["emoji"] == "✅" and m["target"] == done["event_id"] for m in marks):
+                break
+            time.sleep(0.2)
+        seen = [m["emoji"] for m in marks if m["target"] == done["event_id"]]
+        assert "⏳" in seen and "❌" in seen and "✅" in seen and len(alice_files) == before + 1, seen
+        slow["seconds"] = 8.0
+        texts = len(alice_texts)
+        off = alice.say("#art", "!imagine one to call off")
+        for _ in range(100):
+            if any(m["emoji"] == "❌" and m["target"] == off["event_id"] for m in marks):
+                break
+            time.sleep(0.2)
+        time.sleep(1)
+        bob.react(types.SimpleNamespace(room_id=alice.room_id("#art"), event_id=off["event_id"]), "❌")
+        time.sleep(2)
+        assert not stops, "someone else's X called off a request that was not theirs"
+        alice.react(types.SimpleNamespace(room_id=alice.room_id("#art"), event_id=off["event_id"]), "❌")
+        for _ in range(60):
+            if stops:
+                break
+            time.sleep(0.2)
+        time.sleep(2)
+        slow["seconds"] = 0.0
+        assert stops and len(alice_files) == before + 1, "the X did not stop the picture being made"
+        assert not [m.body for m in alice_texts[texts:] if "could not make" in m.body], "calling it off was reported as a failure"
+        assert not any(m["emoji"] == "✅" and m["target"] == off["event_id"] for m in marks)
+        print("ok  reactions: an hourglass and an X while a picture is made, a check mark when done; whoever asked "
+              "calls it off with the X, and nobody else")
         print("ok  placement: a thread under the request by default, kept to a thread it was asked in, or a reply when set")
         # Another bot asks for a picture on a person's behalf: that person's permission decides.
         asking = Bot(vault=os.path.join(tmp, "asking"), username="asking")

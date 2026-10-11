@@ -231,7 +231,8 @@ def job(entry):
     message, prompt, settings = entry["message"], entry["prompt"], entry["settings"]
     with lock:
         if entry["cancelled"]:
-            line.remove(entry)
+            if entry in line:
+                line.remove(entry)
             return
         entry["making"] = True
     working = threading.Event()
@@ -268,15 +269,22 @@ def job(entry):
         # picture program keeps none, and the bot's vault holds only the
         # message that carried it.
         note(f"{message.sender}: a picture in {took:.0f}s: {prompt[:80]}")
+        entry["done"] = True
     except Exception as error:  # noqa: BLE001
-        note(f"no picture: {error}")
-        bot.attempt(bot.reply, message, "I could not make that picture: the picture program on my machine "
-                                        "did not answer. Whoever runs me can see why in my log.")
+        if entry["cancelled"]:
+            note(f"{message.sender}: called off: {prompt[:80]}")
+        else:
+            note(f"no picture: {error}")
+            bot.attempt(bot.reply, message, "I could not make that picture: the picture program on my machine "
+                                            "did not answer. Whoever runs me can see why in my log.")
     finally:
         working.set()
         if path and os.path.exists(path):
             os.remove(path)
         bot.unreact(message, entry["waiting"])
+        bot.unreact(message, entry["stop"])
+        if entry.get("done"):
+            bot.attempt(bot.react, message, "✅")
         with lock:
             if entry in line:
                 line.remove(entry)
@@ -371,10 +379,13 @@ def ask(message, text, again=False):
             return "The line is full; try again in a few minutes."
         asked[message.sender_id] = times + [now]
         entry = {"message": message, "prompt": parsed, "settings": settings, "adult": adult, "cancelled": False,
-                 "making": False, "waiting": None, "who": message.sender_name}
+                 "making": False, "waiting": None, "stop": None, "who": message.sender_name}
         line.append(entry)
         ahead = len(line) - 1
+    # Under the request: an hourglass while it waits and is made, and an X that whoever asked can
+    # press to call it off. Done, both go and a check mark comes.
     entry["waiting"] = bot.attempt(bot.react, message, "⏳")
+    entry["stop"] = bot.attempt(bot.react, message, "❌")
     bot.work(job, entry)
     if ahead:
         return f"{ahead} ahead of you."
@@ -412,9 +423,37 @@ def cancel(message, words):
             e["cancelled"] = True
     for e in mine:
         bot.unreact(e["message"], e["waiting"])
+        bot.unreact(e["message"], e["stop"])
     if mine:
         return f"Taken out of the line: {len(mine)}."
-    return "You have nothing waiting. A picture that is already being made cannot be stopped."
+    return "You have nothing waiting. A picture that is already being made is stopped with the ❌ under your request."
+
+
+@bot.on_reaction
+def pressed(reaction):
+    """The X under a request, pressed by whoever asked (or someone who manages
+    bots): it is called off, waiting or already being made."""
+    if reaction["emoji"] != "❌":
+        return
+    with lock:
+        found = [e for e in line if e["message"].event_id == reaction["target"] and not e["cancelled"]]
+    for e in found:
+        if reaction["sender_id"] != e["message"].sender_id and not bot.may(reaction["sender_id"]):
+            continue
+        with lock:
+            e["cancelled"] = True
+            making = e["making"]
+        if making:
+            try:   # the picture program gives it up at its next step
+                request = urllib.request.Request(args.api.rstrip("/") + "/sdapi/v1/interrupt", data=b"{}",
+                                                 headers={"Content-Type": "application/json"})
+                urllib.request.urlopen(request, timeout=10).read()
+            except Exception as error:  # noqa: BLE001
+                note(f"could not stop the picture: {error}")
+        else:
+            bot.unreact(e["message"], e["waiting"])
+            bot.unreact(e["message"], e["stop"])
+            note(f"{reaction['sender']}: called off: {e['prompt'][:80]}")
 
 
 @bot.command("images", help="here | leave | where | adult off | adult nsfw | limit N, 0 for none (for those who manage bots)")

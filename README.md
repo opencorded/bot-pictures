@@ -88,6 +88,15 @@ machine that reaches the server; it does not have to be the server's.
 To keep it running, and to see it on a page with everything else, list it in
 the [host](https://github.com/opencorded/host).
 
+## Watching and calling off a request
+
+Under a request the bot puts ⏳ and ❌ while the picture waits its turn and
+is made. Whoever asked (or someone who manages bots) presses the ❌ to call
+it off, in the line or half made; when a picture is done both go and ✅
+takes their place. `!cancel` still takes your waiting requests out of the
+line. Stopping a picture that is being made needs a picture program that
+answers `/sdapi/v1/interrupt`, as the one here and AUTOMATIC1111 do.
+
 ## Other models
 
 The picture program draws with any SDXL model that is on the machine in
