@@ -103,7 +103,9 @@ hf download SG161222/RealVisXL_V5.0 --include "scheduler/*" "tokenizer*/*" \
 (with `HF_HOME` set as it is for the picture program, and `hf` from its
 environment). It then shows under **Model** on the bot's page in the app,
 where the server's owner picks the one to draw with; the next picture uses
-it. Nothing needs restarting. The stock model was trained with little adult
+it. Nothing needs restarting. One picture can be asked from another model with
+`--model` and a part of its name (`!imagine a fox --model realvis`), and a bot
+asking for a picture can name one the same way. The stock model was trained with little adult
 material in it; fine-tunes of it differ, and what a model will draw is its
 maker's doing, not this bot's: the bot's own adult rule still decides where.
 

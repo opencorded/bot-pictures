@@ -267,6 +267,16 @@ def main():
                 break
             time.sleep(0.2)
         assert asked[-1]["override_settings"] == {"sd_model_checkpoint": "second/model"}, asked[-1]
+        # One picture from another model, named by a part of its name; an unknown one is said so.
+        before = len(alice_files)
+        alice.say("#art", "!imagine one from the first again --model first")
+        for _ in range(100):
+            if len(alice_files) > before:
+                break
+            time.sleep(0.2)
+        assert asked[-1]["override_settings"] == {"sd_model_checkpoint": "first/model"}, asked[-1]
+        alice.say("#art", "!imagine nothing --model nowhere")
+        wait_for("an unknown model", alice_texts, lambda m: "no model called nowhere" in m.body)
         print("ok  placement: a thread under the request by default, kept to a thread it was asked in, or a reply when set")
         # Another bot asks for a picture on a person's behalf: that person's permission decides.
         asking = Bot(vault=os.path.join(tmp, "asking"), username="asking")
@@ -294,6 +304,10 @@ def main():
                 break
             time.sleep(0.2)
         assert alice_files[-1].reply_to == wanted["event_id"] and asked[-1]["prompt"] == "a heron at dawn hot", asked[-1]
+        named = asking.ask_bot("pictures", "picture", {"prompt": "a heron", "model": "nowhere"}, on_behalf_of=who["alice"], timeout=40)
+        assert not named["ok"] and "no model called" in named["message"], named
+        named = asking.ask_bot("pictures", "picture", {"prompt": "a heron", "model": "first"}, on_behalf_of=who["alice"], timeout=40)
+        assert named["ok"] and asked[-1]["override_settings"] == {"sd_model_checkpoint": "first/model"}, named
         other = asking.ask_bot("pictures", "picture", {"prompt": "a heron", "room_id": alice.room_id("#art"),
                                                        "event_id": wanted["event_id"]}, on_behalf_of=who["bob"], timeout=40)
         assert not other["ok"], other

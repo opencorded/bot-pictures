@@ -109,6 +109,15 @@ bot.setting("channels", "channels", "Channels I work in", help="None chosen: whe
             get=lambda: list(bot.store.get("channels", [])), set=lambda v: keep_setting("channels", v))
 
 
+def model_called(asked):
+    """One of the picture program's models by its name or a part of it ("" if none, or more than one, fits)."""
+    asked = asked.strip().lower()
+    names = models_here()
+    exact = [m for m in names if m.lower() == asked]
+    fits = exact or [m for m in names if asked and asked in m.lower()]
+    return fits[0] if len(fits) == 1 else ""
+
+
 def models_here():
     """The models the picture program has to choose among, if it says (image_server.py and
     AUTOMATIC1111 both do); the one in use comes first when it cannot be asked."""
@@ -143,7 +152,7 @@ def note(*words):
 
 def parse(text):
     """A description and its options: (what to draw, settings) or (None, why not)."""
-    settings = {"size": "square", "seed": -1, "steps": args.steps, "no": ""}
+    settings = {"size": "square", "seed": -1, "steps": args.steps, "no": "", "model": ""}
     parts = re.split(r"\s--(?=[a-z])", " " + text.strip())
     prompt = parts[0].strip()
     for part in parts[1:]:
@@ -160,9 +169,13 @@ def parse(text):
             settings["steps"] = max(5, min(40, int(value)))
         elif name == "no" and value:
             settings["no"] = value
+        elif name == "model" and value:
+            settings["model"] = model_called(value)
+            if not settings["model"]:
+                return None, f"I have no model called {value}. I have: " + ", ".join(f"`{m}`" for m in models_here()) + "."
         else:
             return None, f"I do not know `--{part.strip()}`. The options are `--wide`, `--tall`, `--square`, " \
-                         "`--seed 1234`, `--steps 30` and `--no things to keep out`."
+                         "`--seed 1234`, `--steps 30`, `--no things to keep out` and `--model part-of-its-name`."
     if not prompt:
         return None, "Say what to draw, like `!imagine a lighthouse in a storm, oil painting`."
     return prompt[:1000], settings
@@ -204,8 +217,8 @@ def make(prompt, settings, adult):
         args.api.rstrip("/") + "/sdapi/v1/txt2img",
         data=json.dumps({"prompt": prompt, "negative_prompt": avoid, "width": width, "height": height,
                          "steps": settings["steps"], "seed": settings["seed"], "cfg_scale": 7,
-                         **({"override_settings": {"sd_model_checkpoint": bot.store["model"]}}
-                            if bot.store.get("model") else {})}).encode(),
+                         **({"override_settings": {"sd_model_checkpoint": settings.get("model") or bot.store["model"]}}
+                            if settings.get("model") or bot.store.get("model") else {})}).encode(),
         headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(request, timeout=900) as answer:
         result = json.load(answer)
@@ -239,6 +252,8 @@ def job(entry):
         with os.fdopen(handle, "wb") as f:
             f.write(picture)
         extras = "".join(f" --{settings['size']}" if settings["size"] != "square" else "")
+        if settings.get("model"):
+            extras += f" --model {settings['model'].split('/')[-1]}"
         caption = f"**{prompt}**\n`--seed {seed}{extras}` · {took:.0f} s"
         # In a channel the picture goes into a thread under the request, so a
         # run of pictures does not bury the talk; asked for inside a thread,
@@ -281,6 +296,11 @@ def picture_for(args, asker, via):
     prompt = str(args.get("prompt", "")).strip()[:1000]
     if not prompt:
         return {"ok": False, "message": "no description was given"}
+    model = ""
+    if str(args.get("model", "")).strip():   # a model of the asking bot's choosing, by its name or a part of it
+        model = model_called(str(args["model"]))
+        if not model:
+            return {"ok": False, "message": f"I have no model called {args['model']}"}
     if args.get("room_id"):
         # For a message that person wrote in a chat: made and posted under it
         # by this bot, exactly as if they had asked there themselves, so the
@@ -295,6 +315,8 @@ def picture_for(args, asker, via):
             words += f" --{args['size']}"
         if str(args.get("no", "")).strip():
             words += " --no " + re.sub(r"\s--+", " ", str(args["no"]))[:300]
+        if model:
+            words += " --model " + model
         said = ask(message, words)
         if said and not said.endswith("ahead of you."):
             return {"ok": False, "message": said}
@@ -309,7 +331,7 @@ def picture_for(args, asker, via):
         return {"ok": False, "message": f"{asker['username']} has had {limit} pictures in ten minutes"}
     asked[asker["user_id"]] = times + [now]
     settings = {"size": args.get("size") if args.get("size") in SIZES else "square", "seed": -1, "steps": args_steps(),
-                "no": str(args.get("no", ""))[:300]}
+                "no": str(args.get("no", ""))[:300], "model": model}
     with drawing:
         free_the_card()
         picture, seed = make(prompt, settings, False)
@@ -369,7 +391,8 @@ def again(message, words):
     if message.room_id not in last_words:
         return "Nothing has been made here yet." if works_here(message) else None
     prompt, settings = last_words[message.room_id]
-    options = f" --{settings['size']} --steps {settings['steps']}" + (f" --no {settings['no']}" if settings["no"] else "")
+    options = f" --{settings['size']} --steps {settings['steps']}" + (f" --no {settings['no']}" if settings["no"] else "") \
+        + (f" --model {settings['model']}" if settings.get("model") else "")
     return ask(message, prompt + options)
 
 
