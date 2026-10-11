@@ -88,6 +88,14 @@ machine that reaches the server; it does not have to be the server's.
 To keep it running, and to see it on a page with everything else, list it in
 the [host](https://github.com/opencorded/host).
 
+## Asked by another bot
+
+Other bots can ask for a picture for someone (`picture`, see the kit's
+"bots asking bots"): `{prompt, size, no}`, on that person's behalf. Given the
+`room_id` and `event_id` of a message that person wrote, the picture is made
+and posted under it exactly as if they had asked there, with the channel's
+rules; otherwise the file goes back to the asking bot, and never an adult one.
+
 ## Turning it off and on
 
 `!NAME off` and `!NAME on`, where NAME is the bot's username, from the server's

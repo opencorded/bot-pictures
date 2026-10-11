@@ -250,7 +250,7 @@ def job(entry):
 drawing = threading.Lock()   # one picture at a time, whoever asked and however
 
 
-@bot.offer("picture", help="a picture from a description: {prompt, size: square|wide|tall}")
+@bot.offer("picture", help="a picture from a description: {prompt, size: square|wide|tall, no}; with {room_id, event_id} of a message the person wrote, it is posted under that message instead of sent back")
 def picture_for(args, asker, via):
     """Another bot asks for a picture on someone's behalf: that person's
     permission and limit apply, as if they had asked themselves."""
@@ -261,6 +261,25 @@ def picture_for(args, asker, via):
     prompt = str(args.get("prompt", "")).strip()[:1000]
     if not prompt:
         return {"ok": False, "message": "no description was given"}
+    if args.get("room_id"):
+        # For a message that person wrote in a chat: made and posted under it
+        # by this bot, exactly as if they had asked there themselves, so the
+        # channel's own rules (and whether it is marked NSFW) decide.
+        message = bot.lookup(str(args["room_id"]), str(args.get("event_id", "")))
+        if not message or message.sender_id != asker["user_id"]:
+            return {"ok": False, "message": "I cannot see that message of theirs"}
+        if not works_here(message):
+            return {"ok": False, "message": "I do not make pictures in that channel"}
+        words = re.sub(r"\s--+", " ", prompt)   # a description, not options
+        if args.get("size") in SIZES and args["size"] != "square":
+            words += f" --{args['size']}"
+        if str(args.get("no", "")).strip():
+            words += " --no " + re.sub(r"\s--+", " ", str(args["no"]))[:300]
+        said = ask(message, words)
+        if said and not said.endswith("ahead of you."):
+            return {"ok": False, "message": said}
+        note(f"{asker['username']}, through {via}: asked in a chat: {prompt[:80]}")
+        return {"posted": True, "message": said or ""}
     if ADULT_WORDS.search(prompt):
         return {"ok": False, "message": "I do not make adult pictures when asked this way"}
     now = time.time()

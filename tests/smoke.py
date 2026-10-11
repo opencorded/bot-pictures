@@ -264,7 +264,23 @@ def main():
         assert asked[-1]["prompt"] == "an owl in a sailor's cap" and asked[-1]["height"] == 1216
         refused = asking.ask_bot("pictures", "picture", {"prompt": "anything"}, on_behalf_of=who["bob"], timeout=40)
         assert not refused["ok"] and "may not ask me" in refused["message"], refused
-        print("ok  asked by another bot: draws for a person who may ask, refuses for one who may not")
+        # Asked for a message someone wrote in a channel: posted under it by the picture bot itself.
+        before = len(alice_files)
+        wanted = alice.say("#art", "someone draw me a heron")
+        time.sleep(1)
+        got = asking.ask_bot("pictures", "picture", {"prompt": "a heron at dawn --hot", "room_id": alice.room_id("#art"),
+                                                     "event_id": wanted["event_id"]}, on_behalf_of=who["alice"], timeout=40)
+        assert got["ok"] and got.get("posted") and "file" not in got, got
+        for _ in range(100):
+            if len(alice_files) > before:
+                break
+            time.sleep(0.2)
+        assert alice_files[-1].reply_to == wanted["event_id"] and asked[-1]["prompt"] == "a heron at dawn hot", asked[-1]
+        other = asking.ask_bot("pictures", "picture", {"prompt": "a heron", "room_id": alice.room_id("#art"),
+                                                       "event_id": wanted["event_id"]}, on_behalf_of=who["bob"], timeout=40)
+        assert not other["ok"], other
+        print("ok  asked by another bot: draws for a person who may ask, refuses for one who may not, "
+              "and posts under that person's message when told which")
         print("all image bot checks passed")
     finally:
         for proc in started:
