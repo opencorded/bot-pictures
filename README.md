@@ -95,7 +95,8 @@ Hugging Face's own layout (a `unet` and text encoders in half precision).
 Fetch one, into the same place the first model went:
 
 ```sh
-hf download SG161222/RealVisXL_V5.0 --include model_index.json "scheduler/*" "tokenizer*/*" \
+hf download SG161222/RealVisXL_V5.0 model_index.json
+hf download SG161222/RealVisXL_V5.0 --include "scheduler/*" "tokenizer*/*" \
     "*/config.json" "unet/*.fp16.safetensors" "text_encoder*/*.fp16.safetensors" "vae/*.fp16.safetensors"
 ```
 
