@@ -124,7 +124,10 @@ Other bots can ask for a picture for someone (`picture`, see the kit's
 "bots asking bots"): `{prompt, size, no}`, on that person's behalf. Given the
 `room_id` and `event_id` of a message that person wrote, the picture is made
 and posted under it exactly as if they had asked there, with the channel's
-rules; otherwise the file goes back to the asking bot, and never an adult one.
+rules; with `return_file` as well, it is made the same way and handed back for
+the asking bot to post as its own. With no message named, the file goes back
+to the asking bot, and never an adult one. Descriptions are not written to the
+bot's log.
 
 ## Turning it off and on
 

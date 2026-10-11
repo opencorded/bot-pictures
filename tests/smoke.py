@@ -358,6 +358,16 @@ def main():
         assert not named["ok"] and "no model called" in named["message"], named
         named = asking.ask_bot("pictures", "picture", {"prompt": "a heron", "model": "first"}, on_behalf_of=who["alice"], timeout=40)
         assert named["ok"] and asked[-1]["override_settings"] == {"sd_model_checkpoint": "first/model"}, named
+        # Handed back instead, for the asking bot to post as its own: same rules, nothing posted by the picture bot.
+        before = len(alice_files)
+        again = alice.say("#art", "show me a heron yourself")
+        time.sleep(1)
+        back = asking.ask_bot("pictures", "picture", {"prompt": "a heron in flight", "room_id": alice.room_id("#art"),
+                                                      "event_id": again["event_id"], "return_file": True},
+                              on_behalf_of=who["alice"], timeout=40)
+        assert back["ok"] and open(back["file"], "rb").read() == PNG and asked[-1]["prompt"] == "a heron in flight", back
+        time.sleep(2)
+        assert len(alice_files) == before, "it posted a picture it was asked to hand back"
         other = asking.ask_bot("pictures", "picture", {"prompt": "a heron", "room_id": alice.room_id("#art"),
                                                        "event_id": wanted["event_id"]}, on_behalf_of=who["bob"], timeout=40)
         assert not other["ok"], other

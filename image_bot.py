@@ -256,6 +256,14 @@ def job(entry):
         if settings.get("model"):
             extras += f" --model {settings['model'].split('/')[-1]}"
         caption = f"**{prompt}**\n`--seed {seed}{extras}` · {took:.0f} s"
+        if entry["hand_back"] is not None:
+            # Asked for by another bot, to post itself: the file is its to send and to remove.
+            entry["hand_back"].update(file=path, seed=seed)
+            path = None
+            made["count"] += 1
+            entry["done"] = True
+            note(f"{message.sender}: a picture in {took:.0f}s, handed back")
+            return
         # In a channel the picture goes into a thread under the request, so a
         # run of pictures does not bury the talk; asked for inside a thread,
         # it stays in that thread. A direct chat has no need of threads.
@@ -268,11 +276,11 @@ def job(entry):
         # Nothing of a picture stays behind: the file is removed below, the
         # picture program keeps none, and the bot's vault holds only the
         # message that carried it.
-        note(f"{message.sender}: a picture in {took:.0f}s: {prompt[:80]}")
+        note(f"{message.sender}: a picture in {took:.0f}s")
         entry["done"] = True
     except Exception as error:  # noqa: BLE001
         if entry["cancelled"]:
-            note(f"{message.sender}: called off: {prompt[:80]}")
+            note(f"{message.sender}: called off")
         else:
             note(f"no picture: {error}")
             bot.attempt(bot.reply, message, "I could not make that picture: the picture program on my machine "
@@ -285,6 +293,7 @@ def job(entry):
         bot.unreact(message, entry["stop"])
         if entry.get("done"):
             bot.attempt(bot.react, message, "✅")
+        entry["finished"].set()
         with lock:
             if entry in line:
                 line.remove(entry)
@@ -325,11 +334,26 @@ def picture_for(args, asker, via):
             words += " --no " + re.sub(r"\s--+", " ", str(args["no"]))[:300]
         if model:
             words += " --model " + model
-        said = ask(message, words)
+        if not args.get("return_file"):
+            said = ask(message, words)
+            if said and not said.endswith("ahead of you."):
+                return {"ok": False, "message": said}
+            note(f"{asker['username']}, through {via}: asked in a chat")
+            return {"posted": True, "message": said or ""}
+        # The asking bot posts it itself, as its own: made by the same rules and in the same
+        # line, with the same marks under the person's message, and then handed over.
+        result = {}
+        said = ask(message, words, hand_back=result)
         if said and not said.endswith("ahead of you."):
             return {"ok": False, "message": said}
-        note(f"{asker['username']}, through {via}: asked in a chat: {prompt[:80]}")
-        return {"posted": True, "message": said or ""}
+        with lock:
+            mine = [e for e in line if e["hand_back"] is result]
+        if mine and not mine[0]["finished"].wait(900):
+            return {"ok": False, "message": "the picture took too long"}
+        if not result.get("file"):
+            return {"ok": False, "message": "it was called off" if mine and mine[0]["cancelled"] else "the picture was not made"}
+        note(f"{asker['username']}, through {via}: a picture for {via} to post")
+        return {"file": result["file"], "delete_after": True, "seed": result.get("seed")}
     if ADULT_WORDS.search(prompt):
         return {"ok": False, "message": "I do not make adult pictures when asked this way"}
     now = time.time()
@@ -347,7 +371,7 @@ def picture_for(args, asker, via):
     with os.fdopen(handle, "wb") as f:
         f.write(picture)
     made["count"] += 1
-    note(f"{asker['username']}, through {via}: a picture: {prompt[:80]}")
+    note(f"{asker['username']}, through {via}: a picture")
     return {"file": path, "delete_after": True, "seed": seed}
 
 
@@ -355,7 +379,7 @@ def args_steps():
     return args.steps
 
 
-def ask(message, text, again=False):
+def ask(message, text, again=False, hand_back=None):
     if not works_here(message):
         return None   # not its place: silence, as for any other chatter
     if not bot.allowed(message.sender_id, "use"):
@@ -379,7 +403,7 @@ def ask(message, text, again=False):
             return "The line is full; try again in a few minutes."
         asked[message.sender_id] = times + [now]
         entry = {"message": message, "prompt": parsed, "settings": settings, "adult": adult, "cancelled": False,
-                 "making": False, "waiting": None, "stop": None, "who": message.sender_name}
+                 "finished": threading.Event(), "making": False, "waiting": None, "stop": None, "who": message.sender_name, "hand_back": hand_back}
         line.append(entry)
         ahead = len(line) - 1
     # Under the request: an hourglass while it waits and is made, and an X that whoever asked can
@@ -453,7 +477,9 @@ def pressed(reaction):
         else:
             bot.unreact(e["message"], e["waiting"])
             bot.unreact(e["message"], e["stop"])
-            note(f"{reaction['sender']}: called off: {e['prompt'][:80]}")
+            note(f"{reaction['sender']}: called off")
+            if e["hand_back"] is not None:
+                e["finished"].set()
 
 
 @bot.command("images", help="here | leave | where | adult off | adult nsfw | limit N, 0 for none (for those who manage bots)")
