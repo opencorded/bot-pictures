@@ -2,7 +2,7 @@
 """Runs the image bot against a real server with a stand-in for the picture
 program, and checks what it asks for and what it sends back.
 
-    python3 image_bot_smoke.py <folder with cordedd and corded-cli>
+    python3 tests/smoke.py <folder with cordedd and corded-cli>
 """
 import base64
 import json
@@ -18,8 +18,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 bin_dir = os.path.abspath(sys.argv[1])
 repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-bots = os.path.join(repo, "bots")
-sys.path.insert(0, bots)
+bots = repo
+for kit in (os.environ.get("CORDED_BOT_KIT", ""), repo, os.path.join(repo, "kit"), os.path.join(repo, "..", "bot-kit")):
+    if kit and os.path.exists(os.path.join(kit, "corded_bot.py")):
+        sys.path.insert(0, os.path.abspath(kit))
+        os.environ["CORDED_BOT_KIT"] = os.path.abspath(kit)
+        break
 from corded_bot import Bot  # noqa: E402
 
 os.environ["CORDED_CLI"] = os.path.join(bin_dir, "corded-cli")

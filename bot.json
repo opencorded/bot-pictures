@@ -1,0 +1,57 @@
+{
+  "name": "pictures",
+  "title": "Pictures",
+  "about": "Makes pictures from a description",
+  "kind": "bot",
+  "needs": {
+    "programs": [
+      "a picture program (image_server.py here, or Forge / SD.Next)"
+    ],
+    "optional": [
+      "ffmpeg"
+    ],
+    "gpu": "8 GB"
+  },
+  "start": [
+    "python3",
+    "-u",
+    "image_bot.py",
+    "{server}",
+    "--vault",
+    "{vault}"
+  ],
+  "companions": [
+    {
+      "name": "picture-program",
+      "start": [
+        "{folder}/sd-env/bin/python",
+        "-u",
+        "image_server.py"
+      ],
+      "port": 7860,
+      "memory_max": "6G"
+    }
+  ],
+  "commands": [
+    {
+      "name": "imagine",
+      "help": "a description: the picture"
+    },
+    {
+      "name": "again",
+      "help": "once more, new seed"
+    },
+    {
+      "name": "queue",
+      "help": "who is waiting"
+    },
+    {
+      "name": "cancel",
+      "help": "leave the line"
+    },
+    {
+      "name": "images",
+      "help": "here | leave | where | adult off/nsfw | limit N"
+    }
+  ]
+}
