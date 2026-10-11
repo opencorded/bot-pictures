@@ -41,7 +41,7 @@ parser.add_argument("--idle", type=int, default=45,
 args = parser.parse_args()
 
 one_at_a_time = threading.Lock()
-state = {"pipe": None, "step": 0, "steps": 0, "busy": False, "used": 0.0}
+state = {"pipe": None, "model": args.model, "step": 0, "steps": 0, "busy": False, "used": 0.0}
 
 
 def free_the_card():
@@ -65,25 +65,56 @@ def free_the_card():
         pass
 
 
-def pipeline():
+def models_here():
+    """The SDXL models this machine already holds, for choosing among: those
+    in Hugging Face's own folder that have the parts this program loads.
+    Nothing is fetched here; a model is put there by downloading it."""
+    try:
+        from huggingface_hub.constants import HF_HUB_CACHE as hub
+    except Exception:  # noqa: BLE001
+        hub = os.path.join(os.environ.get("HF_HOME", os.path.expanduser("~/.cache/huggingface")), "hub")
+    found = []
+    for folder in sorted(os.listdir(hub)) if os.path.isdir(hub) else []:
+        if not folder.startswith("models--"):
+            continue
+        shots = os.path.join(hub, folder, "snapshots")
+        for shot in sorted(os.listdir(shots)) if os.path.isdir(shots) else []:
+            has = lambda *parts: os.path.exists(os.path.join(shots, shot, *parts))  # noqa: E731
+            if (has("model_index.json") and has("unet", "diffusion_pytorch_model.fp16.safetensors")
+                    and has("text_encoder_2", "model.fp16.safetensors")):
+                found.append(folder[len("models--"):].replace("--", "/", 1))
+                break
+    return found if args.model in found else [args.model] + found
+
+
+def pipeline(model=None):
     """The model, loaded if it is not. Its largest part goes straight to the
     graphics card and never sits in ordinary memory; the two parts that turn
-    words into numbers are small and wait in ordinary memory between uses."""
+    words into numbers are small and wait in ordinary memory between uses.
+    Asked for another model than the one held, that one is set down first."""
+    import gc
+
+    import torch
+    model = model or state["model"]
+    if state["pipe"] is not None and model != state["model"]:
+        state["pipe"] = None
+        gc.collect()
+        torch.cuda.empty_cache()
     if state["pipe"] is None:
-        import torch
-        from diffusers import AutoPipelineForText2Image, UNet2DConditionModel
+        from diffusers import AutoencoderKL, AutoPipelineForText2Image, UNet2DConditionModel
         free_the_card()
-        print(f"loading {args.model} ...", flush=True)
+        print(f"loading {model} ...", flush=True)
         began = time.time()
-        unet = UNet2DConditionModel.from_pretrained(args.model, subfolder="unet", torch_dtype=torch.float16,
+        unet = UNet2DConditionModel.from_pretrained(model, subfolder="unet", torch_dtype=torch.float16,
                                                     variant="fp16", use_safetensors=True).to("cuda")
-        pipe = AutoPipelineForText2Image.from_pretrained(args.model, unet=unet, torch_dtype=torch.float16,
-                                                         variant="fp16", use_safetensors=True)
+        parts = {"unet": unet}
         if args.vae:
             # The model's own last stage has to work in full precision, which an
             # 8 GB card has no room for beside the rest; this one does not.
-            from diffusers import AutoencoderKL
-            pipe.vae = AutoencoderKL.from_pretrained(args.vae, torch_dtype=torch.float16, use_safetensors=True)
+            parts["vae"] = AutoencoderKL.from_pretrained(args.vae, torch_dtype=torch.float16, use_safetensors=True)
+        pipe = AutoPipelineForText2Image.from_pretrained(model, torch_dtype=torch.float16, variant="fp16",
+                                                         use_safetensors=True, **parts)
+        state["model"] = model
         pipe.vae.to("cuda")
         pipe.vae.enable_tiling()
         pipe.vae.enable_slicing()
@@ -146,7 +177,10 @@ def draw(request):
     with one_at_a_time:
         state.update(step=0, steps=steps, busy=True)
         try:
-            pipe = pipeline()
+            wanted = str((request.get("override_settings") or {}).get("sd_model_checkpoint") or "") or args.model
+            if wanted != args.model and wanted not in models_here():
+                raise ValueError(f"the model {wanted} is not on this machine")
+            pipe = pipeline(wanted)
             # The words are read on the graphics card, then their readers step aside for the drawing.
             encoders = [e for e in (pipe.text_encoder, getattr(pipe, "text_encoder_2", None)) if e is not None]
             for encoder in encoders:
@@ -192,11 +226,13 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
     def do_GET(self):
-        if self.path.startswith("/sdapi/v1/progress"):
+        if self.path.startswith("/sdapi/v1/sd-models"):
+            self.answer(200, [{"title": name, "model_name": name} for name in models_here()])
+        elif self.path.startswith("/sdapi/v1/progress"):
             done = state["step"] / state["steps"] if state["busy"] and state["steps"] else 0.0
             self.answer(200, {"progress": done, "state": {"sampling_step": state["step"], "sampling_steps": state["steps"]}})
         else:
-            self.answer(200, {"model": args.model, "loaded": state["pipe"] is not None, "busy": state["busy"]})
+            self.answer(200, {"model": state["model"], "loaded": state["pipe"] is not None, "busy": state["busy"]})
 
     def do_POST(self):
         if self.path.startswith("/unload"):

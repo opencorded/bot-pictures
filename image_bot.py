@@ -107,6 +107,24 @@ bot.setting("adult", "choice", "Adult pictures", options=["off", "nsfw"],
             get=lambda: bot.store.get("adult", "off"), set=lambda v: keep_setting("adult", v))
 bot.setting("channels", "channels", "Channels I work in", help="None chosen: wherever I am. Direct chats always.",
             get=lambda: list(bot.store.get("channels", [])), set=lambda v: keep_setting("channels", v))
+
+
+def models_here():
+    """The models the picture program has to choose among, if it says (image_server.py and
+    AUTOMATIC1111 both do); the one in use comes first when it cannot be asked."""
+    names = []
+    try:
+        with urllib.request.urlopen(args.api.rstrip("/") + "/sdapi/v1/sd-models", timeout=5) as answer:
+            names = [m.get("title", "") for m in json.load(answer) if m.get("title")]
+    except Exception:  # noqa: BLE001
+        pass
+    now = bot.store.get("model", "")
+    return names if not now or now in names else [now] + names
+
+
+bot.setting("model", "choice", "Model", options=models_here, needs="owner",
+            help="The models on the machine I run on. A model is added by downloading it there; see my README.",
+            get=lambda: bot.store.get("model") or (models_here() or [""])[0], set=lambda v: keep_setting("model", v))
 bot.setting("placement", "choice", "Where a picture goes in a channel", options=["thread", "reply"],
             help="thread: in a thread under the request. reply: in the channel, as a reply to it.",
             get=lambda: bot.store.get("placement", "thread"), set=lambda v: keep_setting("placement", v))
@@ -185,7 +203,9 @@ def make(prompt, settings, adult):
     request = urllib.request.Request(
         args.api.rstrip("/") + "/sdapi/v1/txt2img",
         data=json.dumps({"prompt": prompt, "negative_prompt": avoid, "width": width, "height": height,
-                         "steps": settings["steps"], "seed": settings["seed"], "cfg_scale": 7}).encode(),
+                         "steps": settings["steps"], "seed": settings["seed"], "cfg_scale": 7,
+                         **({"override_settings": {"sd_model_checkpoint": bot.store["model"]}}
+                            if bot.store.get("model") else {})}).encode(),
         headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(request, timeout=900) as answer:
         result = json.load(answer)

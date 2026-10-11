@@ -88,6 +88,24 @@ machine that reaches the server; it does not have to be the server's.
 To keep it running, and to see it on a page with everything else, list it in
 the [host](https://github.com/opencorded/host).
 
+## Other models
+
+The picture program draws with any SDXL model that is on the machine in
+Hugging Face's own layout (a `unet` and text encoders in half precision).
+Fetch one, into the same place the first model went:
+
+```sh
+hf download SG161222/RealVisXL_V5.0 --include model_index.json "scheduler/*" "tokenizer*/*" \
+    "*/config.json" "unet/*.fp16.safetensors" "text_encoder*/*.fp16.safetensors" "vae/*.fp16.safetensors"
+```
+
+(with `HF_HOME` set as it is for the picture program, and `hf` from its
+environment). It then shows under **Model** on the bot's page in the app,
+where the server's owner picks the one to draw with; the next picture uses
+it. Nothing needs restarting. The stock model was trained with little adult
+material in it; fine-tunes of it differ, and what a model will draw is its
+maker's doing, not this bot's: the bot's own adult rule still decides where.
+
 ## Asked by another bot
 
 Other bots can ask for a picture for someone (`picture`, see the kit's

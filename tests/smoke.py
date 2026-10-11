@@ -51,6 +51,13 @@ class Pictures(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(answer)
 
+    def do_GET(self):
+        answer = json.dumps([{"title": "first/model"}, {"title": "second/model"}]).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(answer)
+
     def log_message(self, *_):
         pass
 
@@ -249,6 +256,17 @@ def main():
             time.sleep(0.2)
         assert alice_files[-1].reply_to == second["event_id"] and not alice_files[-1].thread
         page("m.bot.set", key="permission:use", value=[])
+        # The model: chosen among those the picture program has, by the owner, and asked for with each picture.
+        shown = page("m.bot.describe")["model"]
+        assert shown["options"] == ["first/model", "second/model"] and "override_settings" not in asked[-1], shown
+        assert page("m.bot.set", key="model", value="second/model")["model"]["value"] == "second/model"
+        before = len(alice_files)
+        alice.say("#art", "!imagine one from the other model")
+        for _ in range(100):
+            if len(alice_files) > before:
+                break
+            time.sleep(0.2)
+        assert asked[-1]["override_settings"] == {"sd_model_checkpoint": "second/model"}, asked[-1]
         print("ok  placement: a thread under the request by default, kept to a thread it was asked in, or a reply when set")
         # Another bot asks for a picture on a person's behalf: that person's permission decides.
         asking = Bot(vault=os.path.join(tmp, "asking"), username="asking")
