@@ -98,7 +98,7 @@ def main():
         # A description with options: the right request goes out, the picture comes back as a reply.
         asking = alice.say("#general", "!imagine a red fox in the snow --wide --seed 7 --no fog, people")
         got = wait_for("the picture", alice_files, lambda m: True)
-        assert got.file["mime"] == "image/png" and got.reply_to == asking["event_id"], got.raw
+        assert got.file["mime"] == "image/png" and got.thread == asking["event_id"], got.raw
         content = got.raw.get("content") or {}
         if shutil.which("ffmpeg"):   # with it, the apps show the picture in the chat itself
             assert content.get("thumbnail") and content.get("width") == 1 and content.get("height") == 1, content.keys()
@@ -224,6 +224,32 @@ def main():
         wait_for("being told no", bob_texts, lambda m: "may not ask me for pictures" in m.body)
         assert len(asked) == requests
         print("ok  its page: limit, adult rule and channels as controls; a role-held permission to ask for pictures")
+
+        # Where a picture goes: a thread under the request, the same thread when asked inside one, or a reply if set so.
+        page("m.bot.set", key="permission:use", value=["@everyone"])
+        page("m.bot.set", key="limit", value=0)
+        before = len(alice_files)
+        first = alice.say("#art", "!imagine one for the thread")
+        for _ in range(100):
+            if len(alice_files) > before:
+                break
+            time.sleep(0.2)
+        assert alice_files[-1].thread == first["event_id"], ([m.body[:60] for m in alice_texts[-4:]], alice_files[-1].raw.get("relation"), first["event_id"])
+        alice.say("#art", "!again", thread=first["event_id"])
+        for _ in range(100):
+            if len(alice_files) > before + 1:
+                break
+            time.sleep(0.2)
+        assert alice_files[-1].thread == first["event_id"], "asked inside a thread, the picture stays in it"
+        assert page("m.bot.set", key="placement", value="reply")["placement"]["value"] == "reply"
+        second = alice.say("#art", "!imagine one as a reply")
+        for _ in range(100):
+            if len(alice_files) > before + 2:
+                break
+            time.sleep(0.2)
+        assert alice_files[-1].reply_to == second["event_id"] and not alice_files[-1].thread
+        page("m.bot.set", key="permission:use", value=[])
+        print("ok  placement: a thread under the request by default, kept to a thread it was asked in, or a reply when set")
         # Another bot asks for a picture on a person's behalf: that person's permission decides.
         asking = Bot(vault=os.path.join(tmp, "asking"), username="asking")
         asking.connect(address)

@@ -1,7 +1,8 @@
 # Pictures: images from a description, drawn on your own machine
 
-`!imagine a lighthouse in a storm, oil painting` and it replies with the
-picture. So does a mention with a description after it, and anything written
+`!imagine a lighthouse in a storm, oil painting` and it posts the picture in
+a thread under your message (or as a reply in the channel, if that is chosen
+on its page in the app). So does a mention with a description after it, and anything written
 to it in a direct chat. The caption gives the words and the seed, so the same
 picture can be asked for again.
 

@@ -8,7 +8,8 @@
     @pictures a teapot shaped like a snail
 
 The bot puts an hourglass under the request, shows as typing while the
-picture is made, and replies with the picture; its caption gives the words
+picture is made, and posts the picture in a thread under the request (or as
+a reply, if set so on its page); its caption gives the words
 and the seed, so the same picture can be made again. In a direct chat with
 the bot, whatever you write is a description.
 
@@ -87,7 +88,7 @@ bot = Bot(vault=args.vault or f"./{args.username}-vault", username=args.username
           picture=args.picture if args.picture and os.path.exists(args.picture) else None,
           about="I make pictures from a description, on this server's own machine. "
                 "`!imagine a lighthouse in a storm`, or write to me directly. `!help` for the rest.")
-bot.version = "1.1"
+bot.version = "1.2"
 made = {"count": 0}
 
 
@@ -106,6 +107,9 @@ bot.setting("adult", "choice", "Adult pictures", options=["off", "nsfw"],
             get=lambda: bot.store.get("adult", "off"), set=lambda v: keep_setting("adult", v))
 bot.setting("channels", "channels", "Channels I work in", help="None chosen: wherever I am. Direct chats always.",
             get=lambda: list(bot.store.get("channels", [])), set=lambda v: keep_setting("channels", v))
+bot.setting("placement", "choice", "Where a picture goes in a channel", options=["thread", "reply"],
+            help="thread: in a thread under the request. reply: in the channel, as a reply to it.",
+            get=lambda: bot.store.get("placement", "thread"), set=lambda v: keep_setting("placement", v))
 bot.info("made", "Pictures made since I started", get=lambda: str(made["count"]))
 bot.show_status()
 
@@ -216,7 +220,13 @@ def job(entry):
             f.write(picture)
         extras = "".join(f" --{settings['size']}" if settings["size"] != "square" else "")
         caption = f"**{prompt}**\n`--seed {seed}{extras}` · {took:.0f} s"
-        bot.send_file(message.room_id, path, caption, reply_to=message.event_id, thread=message.thread)
+        # In a channel the picture goes into a thread under the request, so a
+        # run of pictures does not bury the talk; asked for inside a thread,
+        # it stays in that thread. A direct chat has no need of threads.
+        if message.direct or bot.store.get("placement", "thread") == "reply":
+            bot.send_file(message.room_id, path, caption, reply_to=message.event_id, thread=message.thread)
+        else:
+            bot.send_file(message.room_id, path, caption, thread=message.thread or message.event_id)
         last_words[message.room_id] = (prompt, settings)
         made["count"] += 1
         # Nothing of a picture stays behind: the file is removed below, the
