@@ -107,6 +107,7 @@ bot.setting("adult", "choice", "Adult pictures", options=["off", "nsfw"],
 bot.setting("channels", "channels", "Channels I work in", help="None chosen: wherever I am. Direct chats always.",
             get=lambda: list(bot.store.get("channels", [])), set=lambda v: keep_setting("channels", v))
 bot.info("made", "Pictures made since I started", get=lambda: str(made["count"]))
+bot.show_status()
 
 lock = threading.Lock()
 line = []           # requests waiting or being made, oldest first
@@ -206,8 +207,9 @@ def job(entry):
     began = time.time()
     path = None
     try:
-        free_the_card()
-        picture, seed = make(prompt, settings, entry["adult"])
+        with drawing:
+            free_the_card()
+            picture, seed = make(prompt, settings, entry["adult"])
         took = time.time() - began
         handle, path = tempfile.mkstemp(prefix="corded-picture-", suffix=".png")
         with os.fdopen(handle, "wb") as f:
@@ -233,6 +235,45 @@ def job(entry):
         with lock:
             if entry in line:
                 line.remove(entry)
+
+
+drawing = threading.Lock()   # one picture at a time, whoever asked and however
+
+
+@bot.offer("picture", help="a picture from a description: {prompt, size: square|wide|tall}")
+def picture_for(args, asker, via):
+    """Another bot asks for a picture on someone's behalf: that person's
+    permission and limit apply, as if they had asked themselves."""
+    if not asker:
+        return {"ok": False, "message": "say who the picture is for"}
+    if not bot.allowed(asker["user_id"], "use"):
+        return {"ok": False, "message": f"{asker['username']} may not ask me for pictures"}
+    prompt = str(args.get("prompt", "")).strip()[:1000]
+    if not prompt:
+        return {"ok": False, "message": "no description was given"}
+    if ADULT_WORDS.search(prompt):
+        return {"ok": False, "message": "I do not make adult pictures when asked this way"}
+    now = time.time()
+    times = [t for t in asked.get(asker["user_id"], []) if now - t < WITHIN]
+    limit = bot.store.get("limit", PER_PERSON)
+    if limit and len(times) >= limit:
+        return {"ok": False, "message": f"{asker['username']} has had {limit} pictures in ten minutes"}
+    asked[asker["user_id"]] = times + [now]
+    settings = {"size": args.get("size") if args.get("size") in SIZES else "square", "seed": -1, "steps": args_steps(),
+                "no": str(args.get("no", ""))[:300]}
+    with drawing:
+        free_the_card()
+        picture, seed = make(prompt, settings, False)
+    handle, path = tempfile.mkstemp(prefix="corded-picture-", suffix=".png")
+    with os.fdopen(handle, "wb") as f:
+        f.write(picture)
+    made["count"] += 1
+    note(f"{asker['username']}, through {via}: a picture: {prompt[:80]}")
+    return {"file": path, "delete_after": True, "seed": seed}
+
+
+def args_steps():
+    return args.steps
 
 
 def ask(message, text, again=False):

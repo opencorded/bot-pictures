@@ -224,6 +224,21 @@ def main():
         wait_for("being told no", bob_texts, lambda m: "may not ask me for pictures" in m.body)
         assert len(asked) == requests
         print("ok  its page: limit, adult rule and channels as controls; a role-held permission to ask for pictures")
+        # Another bot asks for a picture on a person's behalf: that person's permission decides.
+        asking = Bot(vault=os.path.join(tmp, "asking"), username="asking")
+        asking.connect(address)
+        threading.Thread(target=asking.run, daemon=True).start()
+        time.sleep(3)
+        members = alice.request({"cmd": "member_list"})["members"]
+        who = {m["username"]: m["user_id"] for m in members}
+        page("m.bot.set", key="limit", value=0)
+        got = asking.ask_bot("pictures", "picture", {"prompt": "an owl in a sailor's cap", "size": "tall"},
+                             on_behalf_of=who["alice"], timeout=40)
+        assert got["ok"] and open(got["file"], "rb").read() == PNG, got
+        assert asked[-1]["prompt"] == "an owl in a sailor's cap" and asked[-1]["height"] == 1216
+        refused = asking.ask_bot("pictures", "picture", {"prompt": "anything"}, on_behalf_of=who["bob"], timeout=40)
+        assert not refused["ok"] and "may not ask me" in refused["message"], refused
+        print("ok  asked by another bot: draws for a person who may ask, refuses for one who may not")
         print("all image bot checks passed")
     finally:
         for proc in started:
